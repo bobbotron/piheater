@@ -146,24 +146,64 @@ class UpdateReader(threading.Thread):
                 print "Shutting down updater thread!"
                 return None
 
-
+class TemperatureControl(threading.Thread):
+    '''Very basic temperature control, controls a external source using a powerswitch tail'''
+    def __init__(self, gpio_pin, sensor_store):
+        threading.Thread.__init__(self)
+        self.sensor_store = sensor_store 
+        self.state_sensor = self.sensor_store.init_sensor("temp_control_state", "integer")
+        self.gpio_pin = gpio_pin
+        self.shutdown = False
+        self.set_temp(False)
+        
+    def set_temp(self, temp):
+        print "Setting temperature {}".format(temp)
+        self.temp = temp
+        # todo, add GPIO code here
+        
+        timestamp = datetime.datetime.utcnow()
+        
+        if temp:
+            logic_level = 1.0
+        else:
+            logic_level = 0.0
+            
+        print "Updating sensor store..."
+        self.sensor_store.put_float_data(self.state_sensor, logic_level, timestamp )
+        
+    def run ( self ):
+        state = False
+        while ( not self.shutdown ):
+            state = not state
+            self.set_temp(state)
+            for i in range(0, 60*10):
+                if not self.shutdown:
+                    time.sleep(1)
+        print "Shut down temperature control" 
+        
 store = SensorStore()
 
 therm = store.init_sensor(temperature, "C")
 hum = store.init_sensor(humidity, "%")
 
+threads = []
 try:
-  thread1=DHTSensorSource(therm, hum, "4", store)
-  thread1.start()
-  thread2=UpdateReader(therm, "Temperature", 1, store)
-  thread2.start()
+  threads.append(DHTSensorSource(therm, hum, "4", store))
+  threads.append(UpdateReader(therm, hum, 4, store))
+  threads.append(TemperatureControl("8", store))
+  
+  for thread in threads:
+      thread.start()
   while True:
       time.sleep(1)
 except (KeyboardInterrupt, SystemExit):
   print '\n! Received keyboard interrupt, quitting threads.\n'
-  thread1.shutdown = True
-  thread2.shutdown = True
-  thread1.join()
-  thread2.join()
+  
+  for thread in threads:
+      thread.shutdown = True
+      
+  for thread in threads:
+      thread.join()
+      
   print "Exit main"
 
